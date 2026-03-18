@@ -1,0 +1,350 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Users ────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  role          Role      @default(CUSTOMER)
+  avatar        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  orders    Order[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SUPPORT
+  CUSTOMER
+}
+
+// ─── Products ────────────────────────────────────────────────────────────────
+
+model Product {
+  id           String        @id @default(cuid())
+  title        String
+  slug         String        @unique
+  description  String?       @db.Text
+  price        Decimal       @db.Decimal(10, 2)
+  comparePrice Decimal?      @db.Decimal(10, 2)
+  category     String?
+  tags         String[]
+  images       String[]
+  stockMode    StockMode     @default(UNLIMITED)
+  deliveryType DeliveryType  @default(DOWNLOAD)
+  published    Boolean       @default(false)
+  featured     Boolean       @default(false)
+  sortOrder    Int           @default(0)
+  metadata     Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  assets           ProductAsset[]
+  inventoryBatches InventoryBatch[]
+  licenseKeys      LicenseKey[]
+  orderItems       OrderItem[]
+
+  @@index([slug])
+  @@index([category])
+  @@index([published, featured])
+  @@map("products")
+}
+
+enum StockMode {
+  UNLIMITED
+  QUANTITY
+  LICENSE_KEY
+}
+
+enum DeliveryType {
+  DOWNLOAD
+  LICENSE_KEY
+  PRIVATE_LINK
+}
+
+model ProductAsset {
+  id          String   @id @default(cuid())
+  productId   String
+  fileName    String
+  fileSize    Int
+  fileType    String
+  storageKey  String
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_assets")
+}
+
+// ─── Inventory ───────────────────────────────────────────────────────────────
+
+model InventoryBatch {
+  id         String   @id @default(cuid())
+  productId  String
+  quantity   Int
+  remaining  Int
+  label      String?
+  createdAt  DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_batches")
+}
+
+model LicenseKey {
+  id          String          @id @default(cuid())
+  productId   String
+  key         String
+  status      LicenseKeyStatus @default(AVAILABLE)
+  orderId     String?
+  createdAt   DateTime        @default(now())
+  claimedAt   DateTime?
+
+  product Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order   Order?     @relation(fields: [orderId], references: [id])
+
+  @@index([productId, status])
+  @@map("license_keys")
+}
+
+enum LicenseKeyStatus {
+  AVAILABLE
+  RESERVED
+  CLAIMED
+  REVOKED
+}
+
+// ─── Orders ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id                String            @id @default(cuid())
+  orderNumber       String            @unique
+  userId            String?
+  customerEmail     String
+  customerName      String?
+  status            OrderStatus       @default(PENDING)
+  fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
+  subtotal          Decimal           @db.Decimal(10, 2)
+  discount          Decimal           @default(0) @db.Decimal(10, 2)
+  total             Decimal           @db.Decimal(10, 2)
+  couponId          String?
+  notes             String?           @db.Text
+  metadata          Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user        User?         @relation(fields: [userId], references: [id])
+  coupon      Coupon?       @relation(fields: [couponId], references: [id])
+  items       OrderItem[]
+  payments    Payment[]
+  refunds     Refund[]
+  licenseKeys LicenseKey[]
+
+  @@index([orderNumber])
+  @@index([customerEmail])
+  @@index([status])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  CANCELLED
+}
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  FULFILLED
+  PARTIALLY_FULFILLED
+}
+
+model OrderItem {
+  id            String       @id @default(cuid())
+  orderId       String
+  productId     String
+  productTitle  String
+  quantity      Int          @default(1)
+  unitPrice     Decimal      @db.Decimal(10, 2)
+  total         Decimal      @db.Decimal(10, 2)
+  deliveryType  DeliveryType
+  deliveryData  Json?
+  fulfilled     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ─── Payments ────────────────────────────────────────────────────────────────
+
+model Payment {
+  id                  String        @id @default(cuid())
+  orderId             String
+  externalPaymentId   String?
+  provider            String        @default("cashapp")
+  status              PaymentStatus @default(INITIATED)
+  amount              Decimal       @db.Decimal(10, 2)
+  currency            String        @default("USD")
+  providerData        Json?
+  qrCodeUrl           String?
+  redirectUrl         String?
+  expiresAt           DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  order  Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  events PaymentEvent[]
+
+  @@index([externalPaymentId])
+  @@index([orderId])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  INITIATED
+  AWAITING_CUSTOMER_APPROVAL
+  APPROVED
+  PAYMENT_PROCESSING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model PaymentEvent {
+  id        String   @id @default(cuid())
+  paymentId String
+  status    String
+  data      Json?
+  source    String   @default("system")
+  createdAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_events")
+}
+
+model Refund {
+  id                String       @id @default(cuid())
+  orderId           String
+  amount            Decimal      @db.Decimal(10, 2)
+  reason            String?
+  status            RefundStatus @default(PENDING)
+  externalRefundId  String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("refunds")
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ─── Customers (Guest) ──────────────────────────────────────────────────────
+
+model Customer {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("customers")
+}
+
+// ─── Coupons ─────────────────────────────────────────────────────────────────
+
+model Coupon {
+  id            String      @id @default(cuid())
+  code          String      @unique
+  discountType  DiscountType
+  discountValue Decimal     @db.Decimal(10, 2)
+  minOrderValue Decimal?    @db.Decimal(10, 2)
+  maxUses       Int?
+  usedCount     Int         @default(0)
+  active        Boolean     @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  orders Order[]
+
+  @@map("coupons")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ─── Webhooks ────────────────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventType   String
+  payload     Json
+  verified    Boolean  @default(false)
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([provider, eventType])
+  @@map("webhook_events")
+}
+
+// ─── Audit Logs ──────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  data       Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@map("audit_logs")
+}
