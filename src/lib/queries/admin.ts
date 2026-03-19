@@ -175,6 +175,72 @@ export const getAuditLogs = cache(async (opts?: { limit?: number; page?: number 
   return { logs, total, pages: Math.ceil(total / limit) };
 });
 
+// ─── Support / Issues ──────────────────────────────────────────────────────
+
+export const getSupportIssues = cache(async () => {
+  const [failedOrders, refundedOrders, recentRefunds] = await Promise.all([
+    db.order.findMany({
+      where: { status: 'FAILED' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        orderNumber: true,
+        customerEmail: true,
+        status: true,
+        total: true,
+        createdAt: true,
+      },
+    }),
+    db.order.findMany({
+      where: { status: 'REFUNDED' },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        orderNumber: true,
+        customerEmail: true,
+        status: true,
+        total: true,
+        createdAt: true,
+      },
+    }),
+    db.refund.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: { order: { select: { orderNumber: true, customerEmail: true } } },
+    }),
+  ]);
+
+  const openIssues = failedOrders.length;
+  const resolvedIssues = refundedOrders.length;
+
+  const issues = [
+    ...failedOrders.map(o => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      customer: o.customerEmail,
+      subject: `Payment failed for ${o.orderNumber}`,
+      type: 'payment_failed' as const,
+      priority: 'high' as const,
+      status: 'open' as const,
+      created: o.createdAt,
+    })),
+    ...refundedOrders.map(o => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      customer: o.customerEmail,
+      subject: `Refund processed for ${o.orderNumber}`,
+      type: 'refund' as const,
+      priority: 'medium' as const,
+      status: 'resolved' as const,
+      created: o.createdAt,
+    })),
+  ].sort((a, b) => b.created.getTime() - a.created.getTime());
+
+  return { issues, openIssues, resolvedIssues, recentRefunds };
+});
+
 // ─── Webhook Events ─────────────────────────────────────────────────────────
 
 export const getRecentWebhookEvents = cache(async (limit = 10) => {

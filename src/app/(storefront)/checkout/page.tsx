@@ -3,17 +3,18 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, Package, Lock } from 'lucide-react';
+import { ChevronLeft, Package, Lock, Tag } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { CashAppPayButton } from '@/components/checkout/cash-app-button';
 import { PaymentStatus } from '@/components/checkout/payment-status';
 import { useCartStore } from '@/lib/store/cart-store';
 import { formatCurrency } from '@/lib/utils';
 import type { PaymentState } from '@/lib/payment/types';
 
-type CheckoutStep = 'info' | 'payment' | 'processing';
+type CheckoutStep = 'info' | 'processing';
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -22,8 +23,12 @@ export default function CheckoutPage() {
   const [step, setStep] = useState<CheckoutStep>('info');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState('');
   const [paymentData, setPaymentData] = useState<{
     paymentId: string;
+    orderId: string;
+    orderNumber: string;
     qrCodeUrl?: string;
     status: PaymentState;
   } | null>(null);
@@ -34,9 +39,22 @@ export default function CheckoutPage() {
     return null;
   }
 
-  const handlePaymentCreated = (data: { paymentId: string; qrCodeUrl?: string }) => {
+  const handleApplyCoupon = () => {
+    if (couponCode.trim()) {
+      setAppliedCoupon(couponCode.trim().toUpperCase());
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon('');
+    setCouponCode('');
+  };
+
+  const handlePaymentCreated = (data: { paymentId: string; orderId: string; orderNumber: string; qrCodeUrl?: string }) => {
     setPaymentData({
       paymentId: data.paymentId,
+      orderId: data.orderId,
+      orderNumber: data.orderNumber,
       qrCodeUrl: data.qrCodeUrl,
       status: 'awaiting_customer_approval',
     });
@@ -46,9 +64,12 @@ export default function CheckoutPage() {
   const handleStatusChange = (status: PaymentState) => {
     if (status === 'paid') {
       clearCart();
-      router.push('/checkout/success');
+      const orderNum = paymentData?.orderNumber ?? '';
+      router.push(`/checkout/success?order=${orderNum}`);
     }
   };
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   return (
     <div className="container-main py-8">
@@ -72,16 +93,44 @@ export default function CheckoutPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  error={error && !email ? 'Email is required' : undefined}
+                  error={email && !emailValid ? 'Enter a valid email' : undefined}
                 />
                 <Input
-                  label="Full Name"
+                  label="Full Name (optional)"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="John Doe"
                 />
               </div>
 
+              {/* Coupon */}
+              <div className="mt-6 pt-6 border-t border-[var(--border-default)]">
+                <h2 className="font-semibold mb-4 flex items-center gap-2">
+                  <Tag size={16} className="text-[var(--accent)]" />
+                  Coupon Code
+                </h2>
+                {appliedCoupon ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="success">{appliedCoupon}</Badge>
+                    <button onClick={handleRemoveCoupon} className="text-xs text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer">
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value)}
+                      placeholder="Enter coupon code"
+                    />
+                    <Button variant="secondary" onClick={handleApplyCoupon} disabled={!couponCode.trim()}>
+                      Apply
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Payment */}
               <div className="mt-6 pt-6 border-t border-[var(--border-default)]">
                 <h2 className="font-semibold mb-4 flex items-center gap-2">
                   <Lock size={16} className="text-[var(--accent)]" />
@@ -98,10 +147,13 @@ export default function CheckoutPage() {
                 )}
 
                 <CashAppPayButton
-                  amount={subtotal}
+                  items={items.map(i => ({ productId: i.productId, quantity: i.quantity }))}
+                  email={email}
+                  name={name || undefined}
+                  couponCode={appliedCoupon || undefined}
                   onPaymentCreated={handlePaymentCreated}
                   onError={setError}
-                  disabled={!email}
+                  disabled={!emailValid}
                 />
               </div>
             </Card>
@@ -137,8 +189,18 @@ export default function CheckoutPage() {
                 </div>
               ))}
             </div>
-            <div className="border-t border-[var(--border-default)] pt-3">
-              <div className="flex items-center justify-between">
+            <div className="border-t border-[var(--border-default)] pt-3 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-muted)]">Subtotal</span>
+                <span>{formatCurrency(subtotal)}</span>
+              </div>
+              {appliedCoupon && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[var(--text-muted)]">Coupon ({appliedCoupon})</span>
+                  <span className="text-[var(--accent)]">Applied at checkout</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-2 border-t border-[var(--border-default)]">
                 <span className="font-semibold">Total</span>
                 <span className="font-bold text-lg">{formatCurrency(subtotal)}</span>
               </div>

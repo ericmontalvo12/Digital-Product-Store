@@ -3,10 +3,17 @@
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
+interface CartItemPayload {
+  productId: string;
+  quantity: number;
+}
+
 interface CashAppPayButtonProps {
-  amount: number;
-  orderId?: string;
-  onPaymentCreated?: (data: { paymentId: string; qrCodeUrl?: string; redirectUrl?: string }) => void;
+  items: CartItemPayload[];
+  email: string;
+  name?: string;
+  couponCode?: string;
+  onPaymentCreated?: (data: { paymentId: string; orderId: string; orderNumber: string; qrCodeUrl?: string; redirectUrl?: string }) => void;
   onError?: (error: string) => void;
   disabled?: boolean;
   className?: string;
@@ -18,8 +25,10 @@ interface CashAppPayButtonProps {
  * Supports both QR (desktop) and redirect (mobile) flows.
  */
 export function CashAppPayButton({
-  amount,
-  orderId,
+  items,
+  email,
+  name,
+  couponCode,
   onPaymentCreated,
   onError,
   disabled,
@@ -41,9 +50,10 @@ export function CashAppPayButton({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orderId,
-          amount,
-          flow: isMobile ? 'redirect' : 'qr',
+          items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+          email,
+          name,
+          couponCode: couponCode || undefined,
         }),
       });
 
