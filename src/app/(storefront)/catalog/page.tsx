@@ -17,10 +17,18 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
   const search = params.search;
   const page = parseInt(params.page ?? '1');
 
-  const [{ products, total, pages }, categories] = await Promise.all([
-    getPublishedProducts({ category, search, page, limit: 20 }),
-    getProductCategories(),
-  ]);
+  let products: Awaited<ReturnType<typeof getPublishedProducts>>['products'] = [];
+  let total = 0;
+  let pages = 0;
+  let categories: string[] = [];
+  try {
+    [{ products, total, pages }, categories] = await Promise.all([
+      getPublishedProducts({ category, search, page, limit: 20 }),
+      getProductCategories(),
+    ]);
+  } catch {
+    // DB may not be migrated yet — render page with empty state
+  }
 
   return (
     <div className="container-main py-8">

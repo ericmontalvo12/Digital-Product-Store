@@ -10,7 +10,12 @@ import { getFeaturedProducts } from '@/lib/queries/products';
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const featuredProducts = await getFeaturedProducts(4);
+  let featuredProducts: Awaited<ReturnType<typeof getFeaturedProducts>> = [];
+  try {
+    featuredProducts = await getFeaturedProducts(4);
+  } catch {
+    // DB may not be migrated yet — render page with empty state
+  }
 
   return (
     <div>
