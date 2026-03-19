@@ -1,11 +1,14 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import { getPaymentAdapter } from '@/lib/payment';
+import type { AdapterType } from '@/lib/payment';
 import type { PaymentState, CreatePaymentRequest } from '@/lib/payment/types';
 import { canTransition } from '@/lib/payment/types';
 
 export class PaymentService {
-  private adapter = getPaymentAdapter();
+  private getAdapter(provider?: AdapterType) {
+    return getPaymentAdapter(provider);
+  }
 
   async createPayment(params: {
     orderId: string;
@@ -13,7 +16,10 @@ export class PaymentService {
     customerEmail: string;
     returnUrl: string;
     cancelUrl: string;
+    provider?: AdapterType;
   }) {
+    const adapter = this.getAdapter(params.provider);
+
     const request: CreatePaymentRequest = {
       orderId: params.orderId,
       amount: params.amount,
@@ -23,13 +29,13 @@ export class PaymentService {
       cancelUrl: params.cancelUrl,
     };
 
-    const result = await this.adapter.createPayment(request);
+    const result = await adapter.createPayment(request);
 
     const payment = await db.payment.create({
       data: {
         orderId: params.orderId,
         externalPaymentId: result.externalPaymentId,
-        provider: this.adapter.provider,
+        provider: adapter.provider,
         status: this.toDbStatus(result.status),
         amount: params.amount,
         currency: 'USD',
@@ -100,7 +106,9 @@ export class PaymentService {
     const payment = await db.payment.findUniqueOrThrow({ where: { id: paymentId } });
     if (!payment.externalPaymentId) throw new Error('No external payment ID');
 
-    const status = await this.adapter.getPaymentStatus(payment.externalPaymentId);
+    // Use the provider that created this payment
+    const adapter = this.getAdapter(payment.provider as AdapterType);
+    const status = await adapter.getPaymentStatus(payment.externalPaymentId);
     const newStatus = status.status;
     const currentStatus = this.fromDbStatus(payment.status);
 
@@ -115,7 +123,8 @@ export class PaymentService {
     const payment = await db.payment.findUniqueOrThrow({ where: { id: paymentId } });
     if (!payment.externalPaymentId) throw new Error('No external payment ID');
 
-    const result = await this.adapter.refundPayment({
+    const adapter = this.getAdapter(payment.provider as AdapterType);
+    const result = await adapter.refundPayment({
       externalPaymentId: payment.externalPaymentId,
       amount,
       reason,

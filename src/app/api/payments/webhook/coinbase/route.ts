@@ -11,33 +11,34 @@ export async function POST(request: NextRequest) {
       headers[key] = value;
     });
 
-    const result = await webhookService.processWebhook(headers, body);
+    const result = await webhookService.processWebhook(headers, body, 'coinbase');
 
     if (!result.success) {
-      console.error(`Webhook processing failed: ${result.error}`);
+      console.error(`Coinbase webhook processing failed: ${result.error}`);
       return NextResponse.json({ received: true, error: result.error }, { status: 200 });
     }
 
     // Check if this is a balance top-up payment and credit the balance
     const parsed = JSON.parse(body);
-    const externalPaymentId = (parsed.payment_id ?? parsed.id ?? '') as string;
+    const event = parsed.event?.data ?? parsed;
+    const chargeCode = event.code ?? event.id;
 
-    if (externalPaymentId) {
+    if (chargeCode) {
       const payment = await db.payment.findFirst({
-        where: { externalPaymentId },
+        where: { externalPaymentId: chargeCode },
         include: { order: true },
       });
 
       if (payment?.order) {
         const orderMeta = payment.order.metadata as Record<string, unknown> | null;
         if (orderMeta?.type === 'balance_topup' && payment.order.userId) {
-          const statusStr = (parsed.status ?? '') as string;
-          if (statusStr === 'completed' || statusStr === 'captured') {
+          const eventType = parsed.event?.type ?? '';
+          if (eventType === 'charge:confirmed' || eventType === 'charge:completed') {
             await balanceService.creditBalance({
               userId: payment.order.userId,
               amount: Number(payment.amount),
-              provider: 'cashapp',
-              externalPaymentId,
+              provider: 'coinbase',
+              externalPaymentId: chargeCode,
               orderId: payment.orderId,
             });
           }
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ received: true, eventId: result.eventId });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Coinbase webhook error:', error);
     return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }

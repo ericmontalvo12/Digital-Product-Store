@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { CashAppPayButton } from '@/components/checkout/cash-app-button';
+import { PaymentMethodSelector, type PaymentMethodType } from '@/components/checkout/payment-method-selector';
 import { PaymentStatus } from '@/components/checkout/payment-status';
 import { useCartStore } from '@/lib/store/cart-store';
 import { formatCurrency } from '@/lib/utils';
@@ -25,14 +25,17 @@ export default function CheckoutPage() {
   const [name, setName] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('cashapp');
   const [paymentData, setPaymentData] = useState<{
     paymentId: string;
     orderId: string;
     orderNumber: string;
     qrCodeUrl?: string;
+    redirectUrl?: string;
     status: PaymentState;
   } | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   if (items.length === 0 && step === 'info') {
     router.push('/cart');
@@ -50,17 +53,6 @@ export default function CheckoutPage() {
     setCouponCode('');
   };
 
-  const handlePaymentCreated = (data: { paymentId: string; orderId: string; orderNumber: string; qrCodeUrl?: string }) => {
-    setPaymentData({
-      paymentId: data.paymentId,
-      orderId: data.orderId,
-      orderNumber: data.orderNumber,
-      qrCodeUrl: data.qrCodeUrl,
-      status: 'awaiting_customer_approval',
-    });
-    setStep('processing');
-  };
-
   const handleStatusChange = (status: PaymentState) => {
     if (status === 'paid') {
       clearCart();
@@ -70,6 +62,89 @@ export default function CheckoutPage() {
   };
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const handleSubmitPayment = async () => {
+    if (!emailValid || loading) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/payments/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+          email,
+          name: name || undefined,
+          couponCode: appliedCoupon || undefined,
+          paymentMethod,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Payment failed' }));
+        throw new Error(err.error || 'Payment failed');
+      }
+
+      const data = await response.json();
+
+      // Balance payment is instant
+      if (data.paymentMethod === 'balance' || data.status === 'paid') {
+        clearCart();
+        router.push(`/checkout/success?order=${data.orderNumber}`);
+        return;
+      }
+
+      // Coinbase Commerce: redirect to hosted checkout page
+      if (paymentMethod === 'coinbase' && data.redirectUrl) {
+        setPaymentData({
+          paymentId: data.paymentId,
+          orderId: data.orderId,
+          orderNumber: data.orderNumber,
+          redirectUrl: data.redirectUrl,
+          status: 'awaiting_customer_approval',
+        });
+        setStep('processing');
+        // Open Coinbase checkout in new tab, keep polling on this page
+        window.open(data.redirectUrl, '_blank');
+        return;
+      }
+
+      // Cash App flow
+      setPaymentData({
+        paymentId: data.paymentId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        qrCodeUrl: data.qrCodeUrl,
+        redirectUrl: data.redirectUrl,
+        status: 'awaiting_customer_approval',
+      });
+      setStep('processing');
+
+      // Mobile Cash App redirect
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && data.redirectUrl) {
+        window.location.href = data.redirectUrl;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getPayButtonConfig = () => {
+    switch (paymentMethod) {
+      case 'coinbase':
+        return { label: 'Pay with Coinbase Commerce', bg: '#0052FF', hover: '#0047E0' };
+      case 'balance':
+        return { label: 'Pay with Balance', bg: '#8B5CF6', hover: '#7C3AED' };
+      case 'cashapp':
+      default:
+        return { label: 'Pay with Cash App', bg: '#00D632', hover: '#00C22E' };
+    }
+  };
+
+  const btnConfig = getPayButtonConfig();
 
   return (
     <div className="container-main py-8">
@@ -130,31 +205,43 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {/* Payment */}
+              {/* Payment Method */}
               <div className="mt-6 pt-6 border-t border-[var(--border-default)]">
                 <h2 className="font-semibold mb-4 flex items-center gap-2">
                   <Lock size={16} className="text-[var(--accent)]" />
-                  Payment
+                  Payment Method
                 </h2>
-                <p className="text-sm text-[var(--text-muted)] mb-4">
-                  Pay securely with Cash App. You&apos;ll approve the payment in the Cash App.
-                </p>
+
+                <PaymentMethodSelector
+                  selected={paymentMethod}
+                  onSelect={setPaymentMethod}
+                  orderTotal={subtotal}
+                  showBalance={false}
+                />
 
                 {error && (
-                  <div className="mb-4 p-3 rounded-[var(--radius-md)] bg-[var(--error-muted)] text-[var(--error)] text-sm">
+                  <div className="mt-4 p-3 rounded-[var(--radius-md)] bg-[var(--error-muted)] text-[var(--error)] text-sm">
                     {error}
                   </div>
                 )}
 
-                <CashAppPayButton
-                  items={items.map(i => ({ productId: i.productId, quantity: i.quantity }))}
-                  email={email}
-                  name={name || undefined}
-                  couponCode={appliedCoupon || undefined}
-                  onPaymentCreated={handlePaymentCreated}
-                  onError={setError}
-                  disabled={!emailValid}
-                />
+                <button
+                  onClick={handleSubmitPayment}
+                  disabled={!emailValid || loading}
+                  className="w-full flex items-center justify-center gap-3 py-3.5 px-6 rounded-[var(--radius-md)] font-semibold text-base transition-all duration-200 cursor-pointer text-white disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                  style={{ backgroundColor: btnConfig.bg }}
+                  onMouseEnter={(e) => { if (!loading) (e.target as HTMLElement).style.backgroundColor = btnConfig.hover; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.backgroundColor = btnConfig.bg; }}
+                >
+                  {loading ? (
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : (
+                    <span>{btnConfig.label}</span>
+                  )}
+                </button>
               </div>
             </Card>
           )}
@@ -208,7 +295,6 @@ export default function CheckoutPage() {
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-[var(--text-muted)]">
               <Lock size={12} />
               <span>Secure checkout</span>
-              <Badge variant="success">Cash App Pay</Badge>
             </div>
           </Card>
         </div>

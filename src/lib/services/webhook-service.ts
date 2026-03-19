@@ -1,22 +1,23 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import { getPaymentAdapter } from '@/lib/payment';
+import type { AdapterType } from '@/lib/payment';
 import { paymentService } from './payment-service';
 import { fulfillmentService } from './fulfillment-service';
 import type { PaymentState } from '@/lib/payment/types';
 
 export class WebhookService {
-  private adapter = getPaymentAdapter();
+  /** Process an incoming webhook from a specific payment provider. */
+  async processWebhook(headers: Record<string, string>, body: string, provider?: AdapterType) {
+    const adapter = getPaymentAdapter(provider);
 
-  /** Process an incoming webhook from the payment provider. */
-  async processWebhook(headers: Record<string, string>, body: string) {
     // 1. Verify the webhook signature
-    const verification = await this.adapter.verifyWebhook(headers, body);
+    const verification = await adapter.verifyWebhook(headers, body);
 
     // 2. Store the raw event
     const event = await db.webhookEvent.create({
       data: {
-        provider: this.adapter.provider,
+        provider: adapter.provider,
         eventType: verification.eventType,
         payload: verification.payload as object,
         verified: verification.verified,
@@ -30,7 +31,7 @@ export class WebhookService {
 
     // 3. Process the event
     try {
-      await this.handleEvent(verification.eventType, verification.payload);
+      await this.handleEvent(verification.eventType, verification.payload, adapter.provider);
 
       await db.webhookEvent.update({
         where: { id: event.id },
@@ -48,7 +49,21 @@ export class WebhookService {
     }
   }
 
-  private async handleEvent(eventType: string, payload: Record<string, unknown>) {
+  private async handleEvent(eventType: string, payload: Record<string, unknown>, provider: string) {
+    // Coinbase Commerce event types
+    if (provider === 'coinbase') {
+      switch (eventType) {
+        case 'charge:confirmed':
+        case 'charge:completed':
+        case 'charge:failed':
+        case 'charge:pending':
+        case 'charge:resolved':
+          await this.handleCoinbaseCharge(eventType, payload);
+          return;
+      }
+    }
+
+    // Cash App / Afterpay event types
     switch (eventType) {
       case 'payment.approved':
       case 'payment.completed':
@@ -65,6 +80,44 @@ export class WebhookService {
 
       default:
         console.log(`Unhandled webhook event type: ${eventType}`);
+    }
+  }
+
+  private async handleCoinbaseCharge(eventType: string, payload: Record<string, unknown>) {
+    const event = payload.event as Record<string, unknown> | undefined;
+    const data = (event?.data ?? payload) as Record<string, unknown>;
+    const chargeCode = (data.code ?? data.id ?? '') as string;
+
+    if (!chargeCode) return;
+
+    const payment = await db.payment.findFirst({
+      where: { externalPaymentId: chargeCode },
+    });
+
+    if (!payment) {
+      console.error(`Payment not found for Coinbase charge: ${chargeCode}`);
+      return;
+    }
+
+    const statusMap: Record<string, PaymentState> = {
+      'charge:pending': 'payment_processing',
+      'charge:confirmed': 'paid',
+      'charge:completed': 'paid',
+      'charge:resolved': 'paid',
+      'charge:failed': 'failed',
+    };
+
+    const newStatus = statusMap[eventType];
+    if (newStatus) {
+      await paymentService.updatePaymentStatus(payment.id, newStatus, 'webhook', payload);
+
+      if (newStatus === 'paid') {
+        try {
+          await fulfillmentService.fulfillOrder(payment.orderId);
+        } catch (error) {
+          console.error(`Auto-fulfillment failed for order ${payment.orderId}:`, error);
+        }
+      }
     }
   }
 

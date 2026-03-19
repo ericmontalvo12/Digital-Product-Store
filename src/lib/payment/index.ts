@@ -1,39 +1,47 @@
 import type { PaymentAdapter } from './types';
 import { CashAppPayAdapter } from './cashapp-adapter';
 import { AfterpayAdapter } from './afterpay-adapter';
+import { CoinbaseCommerceAdapter } from './coinbase-adapter';
 
 export type { PaymentAdapter } from './types';
 export { CashAppPayAdapter } from './cashapp-adapter';
 export { AfterpayAdapter } from './afterpay-adapter';
+export { CoinbaseCommerceAdapter } from './coinbase-adapter';
 export * from './types';
 
-type AdapterType = 'cashapp' | 'afterpay';
+export type AdapterType = 'cashapp' | 'afterpay' | 'coinbase';
 
-let adapterInstance: PaymentAdapter | null = null;
+const adapterInstances = new Map<AdapterType, PaymentAdapter>();
 
 /**
- * Get the active payment adapter.
- * Defaults to Cash App Pay, falls back to Afterpay if configured.
+ * Get a specific payment adapter by type.
+ * If no type is provided, returns the default adapter from PAYMENT_ADAPTER env var.
  */
-export function getPaymentAdapter(): PaymentAdapter {
-  if (adapterInstance) return adapterInstance;
+export function getPaymentAdapter(type?: AdapterType): PaymentAdapter {
+  const adapterType = type ?? (process.env.PAYMENT_ADAPTER ?? 'cashapp') as AdapterType;
 
-  const adapterType = (process.env.PAYMENT_ADAPTER ?? 'cashapp') as AdapterType;
+  const existing = adapterInstances.get(adapterType);
+  if (existing) return existing;
 
+  let adapter: PaymentAdapter;
   switch (adapterType) {
     case 'afterpay':
-      adapterInstance = new AfterpayAdapter();
+      adapter = new AfterpayAdapter();
+      break;
+    case 'coinbase':
+      adapter = new CoinbaseCommerceAdapter();
       break;
     case 'cashapp':
     default:
-      adapterInstance = new CashAppPayAdapter();
+      adapter = new CashAppPayAdapter();
       break;
   }
 
-  return adapterInstance;
+  adapterInstances.set(adapterType, adapter);
+  return adapter;
 }
 
-/** Reset the adapter (useful for testing or config changes). */
+/** Reset all adapters (useful for testing or config changes). */
 export function resetPaymentAdapter(): void {
-  adapterInstance = null;
+  adapterInstances.clear();
 }
