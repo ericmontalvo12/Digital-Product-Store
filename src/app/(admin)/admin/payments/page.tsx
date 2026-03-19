@@ -1,11 +1,21 @@
-import { CheckCircle, AlertCircle, Wifi, WifiOff, CreditCard, Clock, Shield } from 'lucide-react';
+import { Shield } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Alert } from '@/components/ui/alert';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { getRecentPaymentErrors, getRecentWebhookEvents } from '@/lib/queries/admin';
+import { formatDateTime } from '@/lib/utils';
 
-export default function AdminPaymentsPage() {
+
+export const dynamic = 'force-dynamic';
+
+export default async function AdminPaymentsPage() {
+  const [errors, webhookEvents] = await Promise.all([
+    getRecentPaymentErrors(10),
+    getRecentWebhookEvents(5),
+  ]);
+
+  const lastWebhook = webhookEvents[0];
+
   return (
     <div>
       <div className="mb-6">
@@ -18,24 +28,34 @@ export default function AdminPaymentsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Connection Status</CardTitle>
-            <Badge variant="success">Connected</Badge>
+            <Badge variant={process.env.CASHAPP_API_KEY ? 'success' : 'warning'}>
+              {process.env.CASHAPP_API_KEY ? 'Configured' : 'Not Configured'}
+            </Badge>
           </CardHeader>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">Provider</span>
-              <span>Cash App Pay</span>
+              <span>{process.env.PAYMENT_ADAPTER === 'afterpay' ? 'Afterpay' : 'Cash App Pay'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">Mode</span>
-              <Badge variant="warning">Sandbox</Badge>
+              <Badge variant={process.env.CASHAPP_SANDBOX === 'true' ? 'warning' : 'success'}>
+                {process.env.CASHAPP_SANDBOX === 'true' ? 'Sandbox' : 'Live'}
+              </Badge>
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">Merchant ID</span>
-              <span className="font-mono text-xs">MERCHANT_••••••</span>
+              <span className="font-mono text-xs">
+                {process.env.CASHAPP_MERCHANT_ID
+                  ? `${process.env.CASHAPP_MERCHANT_ID.slice(0, 8)}••••`
+                  : 'Not set'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">API Key</span>
-              <span className="font-mono text-xs">••••••••••••</span>
+              <span className="font-mono text-xs">
+                {process.env.CASHAPP_API_KEY ? '••••••••••••' : 'Not set'}
+              </span>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-[var(--border-default)]">
@@ -49,7 +69,9 @@ export default function AdminPaymentsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Webhook Status</CardTitle>
-            <Badge variant="success">Active</Badge>
+            <Badge variant={lastWebhook ? 'success' : 'default'}>
+              {lastWebhook ? 'Active' : 'No Events'}
+            </Badge>
           </CardHeader>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
@@ -58,15 +80,19 @@ export default function AdminPaymentsPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">Last Delivery</span>
-              <span>2 hours ago</span>
+              <span>{lastWebhook ? formatDateTime(lastWebhook.createdAt) : 'None'}</span>
             </div>
+            {lastWebhook && (
+              <div className="flex justify-between">
+                <span className="text-[var(--text-muted)]">Last Verified</span>
+                <Badge variant={lastWebhook.verified ? 'success' : 'error'}>
+                  {lastWebhook.verified ? 'Verified' : 'Failed'}
+                </Badge>
+              </div>
+            )}
             <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">Last Status</span>
-              <Badge variant="success">200 OK</Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">Events (24h)</span>
-              <span>12</span>
+              <span className="text-[var(--text-muted)]">Total Events</span>
+              <span>{webhookEvents.length}</span>
             </div>
           </div>
         </Card>
@@ -90,7 +116,7 @@ export default function AdminPaymentsPage() {
           <label className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">Desktop QR Flow</p>
-              <p className="text-xs text-[var(--text-muted)]">Show QR code for desktop users</p>
+              <p className="text-xs text-[var(--text-muted)]">Show QR code for desktop users to scan with Cash App</p>
             </div>
             <div className="w-10 h-6 rounded-full bg-[var(--accent)] relative cursor-pointer">
               <div className="absolute right-0.5 top-0.5 w-5 h-5 rounded-full bg-white transition-all" />
@@ -112,26 +138,32 @@ export default function AdminPaymentsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Payment Errors</CardTitle>
-          <Badge variant="default">Last 7 days</Badge>
+          <Badge variant="default">{errors.length} errors</Badge>
         </CardHeader>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Order</TableHead>
-              <TableHead>Error</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow>
-              <TableCell>Mar 12, 10:45 AM</TableCell>
-              <TableCell className="font-mono text-xs">ORD-M3N4O5</TableCell>
-              <TableCell>Payment declined by provider</TableCell>
-              <TableCell><Badge variant="error">Failed</Badge></TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
+        {errors.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Order</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {errors.map((error) => (
+                <TableRow key={error.id}>
+                  <TableCell>{formatDateTime(error.createdAt)}</TableCell>
+                  <TableCell className="font-mono text-xs">{error.order.orderNumber}</TableCell>
+                  <TableCell>{error.provider}</TableCell>
+                  <TableCell><Badge variant="error">Failed</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="text-sm text-[var(--text-muted)] text-center py-4">No payment errors</p>
+        )}
       </Card>
     </div>
   );

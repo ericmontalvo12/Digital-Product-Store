@@ -1,88 +1,94 @@
 import Link from 'next/link';
-import { Search, Filter } from 'lucide-react';
+import { ShoppingCart } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { EmptyState } from '@/components/ui/empty-state';
+import { getOrders } from '@/lib/queries/orders';
+import { formatCurrency, formatDate } from '@/lib/utils';
 
-const orders = [
-  { id: 'ORD-A1B2C3', customer: 'john@example.com', date: 'Mar 15, 2026', total: '$49.00', payment: 'Paid', fulfillment: 'Fulfilled', items: 1 },
-  { id: 'ORD-D4E5F6', customer: 'jane@example.com', date: 'Mar 14, 2026', total: '$79.00', payment: 'Paid', fulfillment: 'Fulfilled', items: 1 },
-  { id: 'ORD-G7H8I9', customer: 'mike@example.com', date: 'Mar 14, 2026', total: '$29.00', payment: 'Pending', fulfillment: 'Unfulfilled', items: 2 },
-  { id: 'ORD-J0K1L2', customer: 'sara@example.com', date: 'Mar 13, 2026', total: '$59.00', payment: 'Paid', fulfillment: 'Fulfilled', items: 1 },
-  { id: 'ORD-M3N4O5', customer: 'alex@example.com', date: 'Mar 12, 2026', total: '$128.00', payment: 'Failed', fulfillment: 'Unfulfilled', items: 3 },
-  { id: 'ORD-P6Q7R8', customer: 'emma@example.com', date: 'Mar 11, 2026', total: '$49.00', payment: 'Refunded', fulfillment: 'Unfulfilled', items: 1 },
-];
-
-function paymentBadgeVariant(status: string) {
+function statusBadge(status: string) {
   switch (status) {
-    case 'Paid': return 'success' as const;
-    case 'Pending': return 'warning' as const;
-    case 'Failed': return 'error' as const;
-    case 'Refunded': return 'default' as const;
+    case 'PAID': return 'success' as const;
+    case 'PENDING': return 'warning' as const;
+    case 'FAILED': return 'error' as const;
+    case 'REFUNDED': return 'default' as const;
     default: return 'default' as const;
   }
 }
 
-function fulfillmentBadgeVariant(status: string) {
+function fulfillmentBadge(status: string) {
   switch (status) {
-    case 'Fulfilled': return 'success' as const;
-    case 'Unfulfilled': return 'warning' as const;
-    default: return 'default' as const;
+    case 'FULFILLED': return 'success' as const;
+    case 'PARTIALLY_FULFILLED': return 'info' as const;
+    default: return 'warning' as const;
   }
 }
 
-export default function AdminOrdersPage() {
+interface OrdersPageProps {
+  searchParams: Promise<{ page?: string; status?: string; search?: string }>;
+}
+
+
+export const dynamic = 'force-dynamic';
+
+export default async function AdminOrdersPage({ searchParams }: OrdersPageProps) {
+  const params = await searchParams;
+  const page = parseInt(params.page ?? '1');
+  const { orders, total } = await getOrders({
+    page,
+    status: params.status,
+    search: params.search,
+  });
+
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
-        <p className="text-sm text-[var(--text-muted)]">{orders.length} orders</p>
+        <p className="text-sm text-[var(--text-muted)]">{total} orders</p>
       </div>
 
-      <div className="flex gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            placeholder="Search orders..."
-            className="w-full rounded-[var(--radius-md)] bg-[var(--bg-input)] border border-[var(--border-default)] pl-9 pr-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
-          />
-        </div>
-      </div>
-
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Order</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead>Items</TableHead>
-            <TableHead>Total</TableHead>
-            <TableHead>Payment</TableHead>
-            <TableHead>Fulfillment</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {orders.map((order) => (
-            <TableRow key={order.id}>
-              <TableCell>
-                <Link href={`/admin/orders/${order.id}`} className="font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors">
-                  {order.id}
-                </Link>
-              </TableCell>
-              <TableCell>{order.customer}</TableCell>
-              <TableCell>{order.date}</TableCell>
-              <TableCell>{order.items}</TableCell>
-              <TableCell className="font-medium text-[var(--text-primary)]">{order.total}</TableCell>
-              <TableCell>
-                <Badge variant={paymentBadgeVariant(order.payment)}>{order.payment}</Badge>
-              </TableCell>
-              <TableCell>
-                <Badge variant={fulfillmentBadgeVariant(order.fulfillment)}>{order.fulfillment}</Badge>
-              </TableCell>
+      {orders.length === 0 ? (
+        <EmptyState
+          icon={ShoppingCart}
+          title="No orders yet"
+          description="Orders will appear here when customers make purchases."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Order</TableHead>
+              <TableHead>Customer</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Items</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Payment</TableHead>
+              <TableHead>Fulfillment</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {orders.map((order) => (
+              <TableRow key={order.id}>
+                <TableCell>
+                  <Link href={`/admin/orders/${order.id}`} className="font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors">
+                    {order.orderNumber}
+                  </Link>
+                </TableCell>
+                <TableCell>{order.customerEmail}</TableCell>
+                <TableCell>{formatDate(order.createdAt)}</TableCell>
+                <TableCell>{order.items.length}</TableCell>
+                <TableCell className="font-medium text-[var(--text-primary)]">{formatCurrency(Number(order.total))}</TableCell>
+                <TableCell>
+                  <Badge variant={statusBadge(order.status)}>{order.status}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={fulfillmentBadge(order.fulfillmentStatus)}>{order.fulfillmentStatus}</Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </div>
   );
 }

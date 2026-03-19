@@ -3,47 +3,15 @@ import { ArrowRight, Zap, Shield, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ProductCard } from '@/components/storefront/product-card';
+import { getFeaturedProducts } from '@/lib/queries/products';
 
-const featuredProducts = [
-  {
-    id: '1',
-    title: 'Premium UI Kit',
-    slug: 'premium-ui-kit',
-    price: 49.00,
-    image: '/placeholder-product.png',
-    category: 'Design',
-    featured: true,
-  },
-  {
-    id: '2',
-    title: 'Developer Toolkit Pro',
-    slug: 'developer-toolkit-pro',
-    price: 79.00,
-    image: '/placeholder-product.png',
-    category: 'Development',
-    featured: true,
-  },
-  {
-    id: '3',
-    title: 'Photography Presets Pack',
-    slug: 'photography-presets-pack',
-    price: 29.00,
-    image: '/placeholder-product.png',
-    category: 'Photography',
-    featured: true,
-  },
-  {
-    id: '4',
-    title: 'Business Template Bundle',
-    slug: 'business-template-bundle',
-    price: 59.00,
-    image: '/placeholder-product.png',
-    category: 'Business',
-    featured: true,
-  },
-];
 
-export default function HomePage() {
+export const dynamic = 'force-dynamic';
+
+export default async function HomePage() {
+  const featuredProducts = await getFeaturedProducts(4);
+
   return (
     <div>
       {/* Hero */}
@@ -108,33 +76,28 @@ export default function HomePage() {
             </Button>
           </Link>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {featuredProducts.map((product) => (
-            <Link key={product.id} href={`/product/${product.slug}`}>
-              <Card hover padding={false} className="group overflow-hidden">
-                <div className="aspect-[4/3] bg-[var(--bg-elevated)] relative">
-                  <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)]">
-                    <Package size={40} strokeWidth={1} />
-                  </div>
-                  <div className="absolute top-3 left-3">
-                    <Badge variant="default">{product.category}</Badge>
-                  </div>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-medium text-sm mb-2 group-hover:text-[var(--accent)] transition-colors">
-                    {product.title}
-                  </h3>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold">${product.price.toFixed(2)}</span>
-                    <Button size="sm" variant="secondary">
-                      View
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </Link>
-          ))}
-        </div>
+
+        {featuredProducts.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {featuredProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                id={product.id}
+                title={product.title}
+                slug={product.slug}
+                price={Number(product.price)}
+                comparePrice={product.comparePrice ? Number(product.comparePrice) : null}
+                category={product.category}
+                images={product.images}
+                stockMode={product.stockMode}
+              />
+            ))}
+          </div>
+        ) : (
+          <Card className="text-center py-12">
+            <p className="text-[var(--text-muted)]">No featured products yet. Check back soon!</p>
+          </Card>
+        )}
       </section>
 
       {/* CTA */}
@@ -152,16 +115,5 @@ export default function HomePage() {
         </Card>
       </section>
     </div>
-  );
-}
-
-function Package({ size, strokeWidth }: { size: number; strokeWidth: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16.5 9.4 7.55 4.24" />
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-      <polyline points="3.29 7 12 12 20.71 7" />
-      <line x1="12" y1="22" x2="12" y2="12" />
-    </svg>
   );
 }
